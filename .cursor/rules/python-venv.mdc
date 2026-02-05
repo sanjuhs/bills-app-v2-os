@@ -1,0 +1,37 @@
+---
+description: Python venv and uv package management standards
+globs: "**/*.py"
+alwaysApply: true
+---
+
+# Python Environment Standards
+
+## Always Use uv for Package Management
+
+```bash
+# ✅ GOOD - Install packages with uv
+uv pip install package-name
+uv pip install -r requirements.txt
+
+# ❌ BAD - Don't use pip directly
+pip install package-name
+```
+
+## Always Activate .venv Before Running Python
+
+```bash
+# ✅ GOOD - Activate venv first
+source .venv/bin/activate && python script.py
+
+# Or use the venv python directly
+.venv/bin/python script.py
+
+# ❌ BAD - Running without venv
+python script.py
+```
+
+## Quick Reference
+
+- Install: `uv pip install <package>`
+- Activate: `source .venv/bin/activate`
+- Run: `python script.py` (after activation) or `.venv/bin/python script.py`

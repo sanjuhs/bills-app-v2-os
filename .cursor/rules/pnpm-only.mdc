@@ -1,0 +1,25 @@
+---
+description: Use pnpm instead of npm
+alwaysApply: true
+---
+
+# Package Manager Standard
+
+- Use `pnpm` for installs, adds, and scripts.
+- Do not use `npm` or `npx`.
+
+## Examples
+
+```bash
+# ✅ GOOD
+pnpm install
+pnpm add package-name
+pnpm run dev
+pnpm dlx some-cli
+
+# ❌ BAD
+npm install
+npm add package-name
+npm run dev
+npx some-cli
+```
