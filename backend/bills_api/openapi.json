@@ -1,0 +1,680 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Bills API",
+    "version": "1.0.0",
+    "description": "Social bill-tracking & spending app API. Use these endpoints from any frontend (web, Flutter, etc.)."
+  },
+  "servers": [
+    {
+      "url": "/api",
+      "description": "API base path"
+    }
+  ],
+  "tags": [
+    { "name": "Profiles", "description": "User profile management" },
+    { "name": "Feed", "description": "Main and profile feeds" },
+    { "name": "Media", "description": "Presigned upload URLs" },
+    { "name": "Posts", "description": "Bill posts CRUD" },
+    { "name": "Comments", "description": "Post comments" },
+    { "name": "Likes", "description": "Post likes" },
+    { "name": "Tips", "description": "Post tips" }
+  ],
+  "paths": {
+    "/profiles/me/": {
+      "get": {
+        "tags": ["Profiles"],
+        "summary": "Get current user profile",
+        "description": "Fetch the profile for the authenticated user by Clerk ID.",
+        "operationId": "getProfileMe",
+        "parameters": [
+          {
+            "name": "clerk_id",
+            "in": "query",
+            "required": true,
+            "schema": { "type": "string" },
+            "description": "Clerk user ID (required)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["profile"],
+                  "properties": {
+                    "profile": { "$ref": "#/components/schemas/Profile" }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Profile not found"
+          }
+        }
+      }
+    },
+    "/profiles/": {
+      "post": {
+        "tags": ["Profiles"],
+        "summary": "Create profile",
+        "description": "Create a new user profile.",
+        "operationId": "createProfile",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["handle"],
+                "properties": {
+                  "handle": { "type": "string" },
+                  "display_name": { "type": "string" },
+                  "bio": { "type": "string" },
+                  "avatar_url": { "type": "string" },
+                  "country": { "type": "string" },
+                  "preferred_currency": { "type": "string" },
+                  "clerk_user_id": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Profile created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["profile"],
+                  "properties": {
+                    "profile": { "$ref": "#/components/schemas/Profile" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/profiles/{handle}/": {
+      "patch": {
+        "tags": ["Profiles"],
+        "summary": "Update profile",
+        "description": "Partially update a profile by handle.",
+        "operationId": "updateProfile",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "bio": { "type": "string" },
+                  "display_name": { "type": "string" },
+                  "avatar_url": { "type": "string" },
+                  "country": { "type": "string" },
+                  "preferred_currency": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Profile updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["profile"],
+                  "properties": {
+                    "profile": { "$ref": "#/components/schemas/Profile" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feeds/main/": {
+      "get": {
+        "tags": ["Feed"],
+        "summary": "Get main feed",
+        "description": "Fetch the main feed of posts. Use my_handle to include liked_by_me on each post.",
+        "operationId": "getMainFeed",
+        "parameters": [
+          {
+            "name": "my_handle",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Current user handle for liked_by_me"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Feed items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["items"],
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Post" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/feeds/profile/{handle}/": {
+      "get": {
+        "tags": ["Feed"],
+        "summary": "Get profile feed",
+        "description": "Fetch a user's profile and their posts. Use my_handle for liked_by_me.",
+        "operationId": "getProfileFeed",
+        "parameters": [
+          {
+            "name": "handle",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "my_handle",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "string" },
+            "description": "Current user handle for liked_by_me"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Profile and feed items",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["profile", "items"],
+                  "properties": {
+                    "profile": { "$ref": "#/components/schemas/Profile" },
+                    "items": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Post" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/media/presign/": {
+      "post": {
+        "tags": ["Media"],
+        "summary": "Get presigned upload URL",
+        "description": "Get a presigned S3 URL for uploading media.",
+        "operationId": "presignUpload",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["filename", "content_type"],
+                "properties": {
+                  "filename": { "type": "string" },
+                  "content_type": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Presigned URL and S3 key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["upload_url", "s3_key"],
+                  "properties": {
+                    "upload_url": { "type": "string" },
+                    "s3_key": { "type": "string" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/": {
+      "post": {
+        "tags": ["Posts"],
+        "summary": "Create post",
+        "description": "Create a new bill post. s3_keys supports multi-image uploads.",
+        "operationId": "createPost",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["handle", "s3_keys"],
+                "properties": {
+                  "handle": { "type": "string" },
+                  "s3_keys": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "caption": { "type": "string" },
+                  "image_url": { "type": "string" },
+                  "suggested_price": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Post created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["post"],
+                  "properties": {
+                    "post": { "$ref": "#/components/schemas/Post" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/": {
+      "get": {
+        "tags": ["Posts"],
+        "summary": "Get post",
+        "description": "Fetch a single post by ID. Used for polling AI analysis.",
+        "operationId": "getPost",
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Post found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["post"],
+                  "properties": {
+                    "post": { "$ref": "#/components/schemas/Post" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": ["Posts"],
+        "summary": "Delete post",
+        "description": "Delete a post by ID.",
+        "operationId": "deletePost",
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Post deleted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["deleted"],
+                  "properties": {
+                    "deleted": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/like/": {
+      "post": {
+        "tags": ["Posts", "Likes"],
+        "summary": "Like or unlike post",
+        "description": "Toggle like on a post.",
+        "operationId": "likePost",
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["handle"],
+                "properties": {
+                  "handle": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Like status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["liked", "likes"],
+                  "properties": {
+                    "liked": { "type": "boolean" },
+                    "likes": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/tip/": {
+      "post": {
+        "tags": ["Posts", "Tips"],
+        "summary": "Tip a post",
+        "description": "Send a tip to a post author.",
+        "operationId": "tipPost",
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["from_handle"],
+                "properties": {
+                  "from_handle": { "type": "string" },
+                  "amount": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Tip result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["tipped", "your_coins", "post_tips"],
+                  "properties": {
+                    "tipped": { "type": "boolean" },
+                    "your_coins": { "type": "number" },
+                    "post_tips": { "type": "number" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/posts/{post_id}/comments/": {
+      "get": {
+        "tags": ["Posts", "Comments"],
+        "summary": "Get post comments",
+        "description": "Fetch threaded comments for a post.",
+        "operationId": "getPostComments",
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Threaded comments",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["comments"],
+                  "properties": {
+                    "comments": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/Comment" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Posts", "Comments"],
+        "summary": "Add comment",
+        "description": "Add a comment to a post. Use parent_id for replies.",
+        "operationId": "createComment",
+        "parameters": [
+          {
+            "name": "post_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["handle", "text"],
+                "properties": {
+                  "handle": { "type": "string" },
+                  "text": { "type": "string" },
+                  "parent_id": { "type": "integer" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Comment created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["comment"],
+                  "properties": {
+                    "comment": { "$ref": "#/components/schemas/Comment" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/comments/{comment_id}/": {
+      "patch": {
+        "tags": ["Comments"],
+        "summary": "Edit comment",
+        "description": "Update a comment's text.",
+        "operationId": "updateComment",
+        "parameters": [
+          {
+            "name": "comment_id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["handle", "text"],
+                "properties": {
+                  "handle": { "type": "string" },
+                  "text": { "type": "string" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Comment updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["comment"],
+                  "properties": {
+                    "comment": {
+                      "type": "object",
+                      "required": ["id", "text", "edited_at"],
+                      "properties": {
+                        "id": { "type": "integer" },
+                        "text": { "type": "string" },
+                        "edited_at": { "type": "string", "format": "date-time" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "Profile": {
+        "type": "object",
+        "properties": {
+          "handle": { "type": "string" },
+          "display_name": { "type": "string" },
+          "avatar_url": { "type": "string" },
+          "bio": { "type": "string" },
+          "country": { "type": "string" },
+          "preferred_currency": { "type": "string" },
+          "coins": { "type": "number" },
+          "followers": { "type": "integer" },
+          "is_verified": { "type": "boolean" },
+          "posts_count": { "type": "integer" }
+        }
+      },
+      "ProfileSummary": {
+        "type": "object",
+        "properties": {
+          "handle": { "type": "string" },
+          "display_name": { "type": "string" },
+          "avatar_url": { "type": "string" }
+        }
+      },
+      "Post": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "profile": { "$ref": "#/components/schemas/ProfileSummary" },
+          "images": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "image_url": { "type": "string" },
+          "caption": { "type": "string" },
+          "amount": { "type": "number" },
+          "original_amount": { "type": "number" },
+          "category": { "type": "string" },
+          "tag": { "type": "string" },
+          "location": { "type": "string" },
+          "ai_analysis": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "tips_total": { "type": "number" },
+          "likes": { "type": "integer" },
+          "liked_by_me": { "type": "boolean" },
+          "comments": { "type": "integer" },
+          "created_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Comment": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "profile": { "$ref": "#/components/schemas/ProfileSummary" },
+          "text": { "type": "string" },
+          "parent_id": { "type": ["integer", "null"] },
+          "edited_at": { "type": ["string", "null"], "format": "date-time" },
+          "created_at": { "type": "string", "format": "date-time" },
+          "replies": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/Comment" }
+          }
+        }
+      }
+    }
+  }
+}
