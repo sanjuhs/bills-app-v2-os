@@ -81,12 +81,26 @@ import dj_database_url  # noqa: E402
 if os.getenv("DATABASE_URL"):
     DATABASES = {"default": dj_database_url.config(conn_max_age=600)}
 else:
+    _sqlite_dir = Path(os.getenv("SQLITE_DIR", BASE_DIR))
+    _sqlite_dir.mkdir(parents=True, exist_ok=True)
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": _sqlite_dir / "db.sqlite3",
+            "OPTIONS": {"transaction_mode": "IMMEDIATE"},
         }
     }
+
+from django.db.backends.signals import connection_created  # noqa: E402
+
+def _sqlite_pragmas(sender, connection, **kwargs):
+    if connection.vendor == "sqlite":
+        with connection.cursor() as cur:
+            cur.execute("PRAGMA journal_mode=WAL;")
+            cur.execute("PRAGMA synchronous=NORMAL;")
+            cur.execute("PRAGMA busy_timeout=5000;")
+
+connection_created.connect(_sqlite_pragmas)
 
 
 # Password validation
