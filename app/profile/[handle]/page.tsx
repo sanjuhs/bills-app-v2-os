@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { TouchEvent, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
@@ -437,32 +437,73 @@ export default function ProfilePage() {
 
 function ProfileCarousel({ images }: { images: string[] }) {
   const [idx, setIdx] = useState(0)
+  const touchStartX = useRef<number | null>(null)
+  const touchDeltaX = useRef(0)
   const count = images.length
+  const clampedIdx = Math.min(idx, Math.max(0, count - 1))
+  const SWIPE_THRESHOLD = 45
+
+  function goPrev() {
+    setIdx(prev => Math.max(0, Math.min(prev, count - 1) - 1))
+  }
+
+  function goNext() {
+    setIdx(prev => Math.min(count - 1, Math.min(prev, count - 1) + 1))
+  }
+
+  function handleTouchStart(e: TouchEvent<HTMLDivElement>) {
+    touchStartX.current = e.touches[0]?.clientX ?? null
+    touchDeltaX.current = 0
+  }
+
+  function handleTouchMove(e: TouchEvent<HTMLDivElement>) {
+    if (touchStartX.current == null) return
+    touchDeltaX.current = (e.touches[0]?.clientX ?? 0) - touchStartX.current
+  }
+
+  function handleTouchEnd() {
+    const delta = touchDeltaX.current
+    if (Math.abs(delta) >= SWIPE_THRESHOLD) {
+      if (delta < 0) goNext()
+      if (delta > 0) goPrev()
+    }
+    touchStartX.current = null
+    touchDeltaX.current = 0
+  }
+
   if (count === 1) return <img src={images[0]} alt="" className="aspect-square w-full object-cover" />
 
   return (
-    <div className="group/car relative aspect-square overflow-hidden">
-      <div className="flex h-full transition-transform duration-300 ease-out" style={{ transform: `translateX(-${idx * 100}%)` }}>
+    <div
+      className="group/car relative aspect-square overflow-hidden touch-pan-y"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+    >
+      <div className="flex h-full transition-transform duration-300 ease-out" style={{ transform: `translateX(-${clampedIdx * 100}%)` }}>
         {images.map((src, i) => (
           <img key={i} src={src} alt="" className="aspect-square w-full shrink-0 object-cover" />
         ))}
       </div>
-      {idx > 0 && (
-        <button onClick={() => setIdx(idx - 1)} className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/50 p-1 text-white opacity-0 transition group-hover/car:opacity-100">
+      {clampedIdx > 0 && (
+        <button onClick={goPrev} className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/50 p-1 text-white opacity-0 transition group-hover/car:opacity-100">
           <ChevronLeft className="size-4" />
         </button>
       )}
-      {idx < count - 1 && (
-        <button onClick={() => setIdx(idx + 1)} className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/50 p-1 text-white opacity-0 transition group-hover/car:opacity-100">
+      {clampedIdx < count - 1 && (
+        <button onClick={goNext} className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/50 p-1 text-white opacity-0 transition group-hover/car:opacity-100">
           <ChevronRight className="size-4" />
         </button>
       )}
       <div className="absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 gap-1">
         {images.map((_, i) => (
-          <button key={i} onClick={() => setIdx(i)} className={`size-1.5 rounded-full transition ${i === idx ? "bg-white" : "bg-white/40"}`} />
+          <button key={i} onClick={() => setIdx(i)} className={`size-1.5 rounded-full transition ${i === clampedIdx ? "bg-white" : "bg-white/40"}`} />
         ))}
       </div>
-      <span className="absolute right-3 top-3 z-10 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white">{idx + 1}/{count}</span>
+      <span className="pointer-events-none absolute left-3 top-3 z-10 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white">
+        {clampedIdx + 1}/{count}
+      </span>
     </div>
   )
 }

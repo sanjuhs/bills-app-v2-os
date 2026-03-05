@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 from django.test import TestCase
 
 from .models import Comment, Like, Post, PostImage, Profile
+from .views import _aggregate_analyses, _amount_from_caption, _to_decimal
 
 
 class ProfileTests(TestCase):
@@ -158,6 +159,32 @@ class PostTests(TestCase):
         self.assertEqual(images[1].s3_key, s3_keys[1])
         self.assertEqual(images[0].order, 0)
         self.assertEqual(images[1].order, 1)
+
+    def test_create_post_with_five_s3_keys_does_not_fail(self):
+        """Creating a post with 5 images should succeed and preserve order."""
+        Profile.objects.create(handle="multi5", display_name="Multi Five")
+        s3_keys = [
+            "bills-app/uploads/key1.jpg",
+            "bills-app/uploads/key2.jpg",
+            "bills-app/uploads/key3.jpg",
+            "bills-app/uploads/key4.jpg",
+            "bills-app/uploads/key5.jpg",
+        ]
+        resp = self.client.post(
+            "/api/posts/",
+            data=json.dumps({
+                "handle": "multi5",
+                "caption": "5 photo upload",
+                "s3_keys": s3_keys,
+            }),
+            content_type="application/json",
+        )
+        self.assertEqual(resp.status_code, 201)
+        post = Post.objects.get(profile__handle="multi5")
+        images = list(post.images.order_by("order"))
+        self.assertEqual(len(images), 5)
+        self.assertEqual([img.s3_key for img in images], s3_keys)
+        self.assertEqual([img.order for img in images], [0, 1, 2, 3, 4])
 
     def test_get_post_detail(self):
         """GET posts/<id>/ returns post detail."""
@@ -474,3 +501,44 @@ class PresignTests(TestCase):
         self.assertTrue(data["upload_url"].startswith("https://"))
         self.assertIn("bills-app/uploads/", data["s3_key"])
         self.assertTrue(data["s3_key"].endswith(".png"))
+
+
+class AnalysisAggregationTests(TestCase):
+    """Parsing + multi-image amount aggregation behavior."""
+
+    def test_to_decimal_parses_common_money_formats(self):
+        self.assertEqual(_to_decimal("1,299.50"), Decimal("1299.50"))
+        self.assertEqual(_to_decimal("₹2,499"), Decimal("2499"))
+        self.assertEqual(_to_decimal("INR 300"), Decimal("300"))
+        self.assertEqual(_to_decimal("Rs. 75"), Decimal("75"))
+
+    def test_amount_from_caption_extracts_currency_amount(self):
+        self.assertEqual(_amount_from_caption("Dinner was ₹1,250 today"), Decimal("1250"))
+        self.assertEqual(_amount_from_caption("Paid INR 499 for snacks"), Decimal("499"))
+        self.assertIsNone(_amount_from_caption("No amount here"))
+
+    def test_aggregate_analyses_sums_five_images(self):
+        analyses = [
+            {"amount": "100", "original_amount": None, "category": "food", "tags": ["#a"], "confidence": 0.9, "is_monetary": True},
+            {"amount": "200", "original_amount": None, "category": "food", "tags": ["#b"], "confidence": 0.8, "is_monetary": True},
+            {"amount": "300", "original_amount": None, "category": "food", "tags": ["#c"], "confidence": 0.7, "is_monetary": True},
+            {"amount": "400", "original_amount": None, "category": "food", "tags": ["#d"], "confidence": 0.6, "is_monetary": True},
+            {"amount": "500", "original_amount": "650", "category": "food", "tags": ["#e"], "confidence": 0.5, "is_monetary": True},
+        ]
+        result = _aggregate_analyses(analyses, caption="", image_count_submitted=5)
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["amount"], 1500.0)
+        self.assertEqual(result["original_amount"], 650.0)
+        self.assertEqual(result["image_count_analyzed"], 5)
+        self.assertEqual(result["image_count_submitted"], 5)
+
+    def test_aggregate_analyses_uses_caption_amount_when_ai_errors(self):
+        analyses = [
+            {"error": "upstream timeout", "amount": 0, "tags": [], "confidence": 0},
+            {"error": "upstream timeout", "amount": 0, "tags": [], "confidence": 0},
+        ]
+        result = _aggregate_analyses(analyses, caption="Spent ₹2,345 total", image_count_submitted=2)
+        self.assertEqual(result["status"], "done")
+        self.assertEqual(result["amount"], 2345.0)
+        self.assertEqual(result["image_count_analyzed"], 0)
+        self.assertEqual(result["image_count_submitted"], 2)

@@ -1,6 +1,6 @@
 "use client"
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react"
+import { FormEvent, TouchEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useUser } from "@clerk/nextjs"
@@ -81,6 +81,7 @@ export default function FeedPage() {
   const [posts, setPosts] = useState<FeedPost[]>([])
   const [feedLoading, setFeedLoading] = useState(true)
   const [showComposer, setShowComposer] = useState(false)
+  const [composerStep, setComposerStep] = useState<"media" | "caption">("media")
   const [caption, setCaption] = useState("")
   const [files, setFiles] = useState<File[]>([])
   const [uploadingBanner, setUploadingBanner] = useState<string | null>(null)
@@ -126,6 +127,28 @@ export default function FeedPage() {
   }, [profileState, myProfile, fetchFeed])
 
   const previews = useMemo(() => files.map(f => URL.createObjectURL(f)), [files])
+  const hasComposerFiles = files.length > 0
+  const canShareComposer = hasComposerFiles && Boolean(caption.trim())
+
+  function openComposer() {
+    setComposerStep("media")
+    setShowComposer(true)
+  }
+
+  function closeComposer() {
+    setShowComposer(false)
+    setComposerStep("media")
+  }
+
+  function replaceFiles(fileList: FileList | null) {
+    if (!fileList?.length) return
+    setFiles(Array.from(fileList))
+  }
+
+  function appendFiles(fileList: FileList | null) {
+    if (!fileList?.length) return
+    setFiles(prev => [...prev, ...Array.from(fileList)])
+  }
 
   function pollPostUntilReady(postId: number) {
     const check = async () => {
@@ -149,11 +172,11 @@ export default function FeedPage() {
 
   async function handleSubmit(e?: FormEvent) {
     e?.preventDefault()
-    if (!myProfile || !caption.trim()) return
+    if (!myProfile || !hasComposerFiles || !caption.trim()) return
     const pendingFiles = [...files]
     const pendingCaption = caption.trim()
 
-    setShowComposer(false)
+    closeComposer()
     setCaption("")
     setFiles([])
     setUploadingBanner(pendingFiles.length ? `Uploading ${pendingFiles.length} image${pendingFiles.length > 1 ? "s" : ""} & analyzing...` : "Publishing your post...")
@@ -288,7 +311,7 @@ export default function FeedPage() {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <Sidebar onCreateClick={() => setShowComposer(true)} coins={myProfile?.coins} />
+      <Sidebar onCreateClick={openComposer} coins={myProfile?.coins} />
 
       <main className="pb-16 md:ml-[60px] md:pb-0">
         <div className="mx-auto max-w-[470px] px-4 py-4">
@@ -302,7 +325,7 @@ export default function FeedPage() {
             <div className="flex items-center justify-center py-32"><Loader2 className="size-6 animate-spin text-muted-foreground" /></div>
           ) : posts.length === 0 ? (
             <p className="py-32 text-center text-sm text-muted-foreground">
-              No posts yet. Hit <button onClick={() => setShowComposer(true)} className="text-amber-500 hover:underline">Create</button> to share a bill.
+              No posts yet. Hit <button onClick={openComposer} className="text-amber-500 hover:underline">Create</button> to share a bill.
             </p>
           ) : (
             <div className="divide-y divide-border">
@@ -434,44 +457,132 @@ export default function FeedPage() {
       </main>
 
       {showComposer && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-3xl overflow-hidden rounded-xl border border-border bg-card">
+        <div className="fixed inset-0 z-50 bg-black/70 md:flex md:items-center md:justify-center md:p-4">
+          <div className="flex h-[100dvh] w-full flex-col bg-card pb-[max(env(safe-area-inset-bottom),0px)] md:h-auto md:max-h-[90vh] md:max-w-3xl md:overflow-hidden md:rounded-xl md:border md:border-border">
             <div className="flex items-center justify-between border-b border-border px-4 py-3">
-              <button onClick={() => setShowComposer(false)} className="text-muted-foreground transition hover:text-foreground"><X className="size-5" /></button>
+              <button onClick={closeComposer} className="text-muted-foreground transition hover:text-foreground"><X className="size-5" /></button>
               <h2 className="text-sm font-semibold">Create new post</h2>
-              <button onClick={() => handleSubmit()} disabled={!caption.trim()} className="text-sm font-semibold text-amber-500 transition hover:text-amber-400 disabled:opacity-40">
+              <button onClick={() => handleSubmit()} disabled={!canShareComposer} className="hidden text-sm font-semibold text-amber-500 transition hover:text-amber-400 disabled:opacity-40 md:inline-flex">
                 Share
               </button>
+              <div className="w-5 md:hidden" />
             </div>
-            <div className="grid md:grid-cols-2">
-              <div className="relative flex aspect-square items-center justify-center border-b border-border bg-black/10 dark:bg-black/30 md:border-b-0 md:border-r">
-                {previews.length > 0 ? (
-                  <div className="relative size-full">
-                    <Carousel images={previews} />
-                    <label className="absolute bottom-3 right-3 z-10 flex cursor-pointer items-center gap-1 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-black/80">
-                      <ImagePlus className="size-3.5" /> Add more
-                      <input type="file" accept="image/*" multiple className="hidden" onChange={e => { if (e.target.files?.length) setFiles(prev => [...prev, ...Array.from(e.target.files!)]) }} />
-                    </label>
+
+            <div className="flex-1 overflow-y-auto">
+              <div className="md:hidden">
+                {composerStep === "media" ? (
+                  <div className="space-y-4 p-4">
+                    <p className="text-xs text-muted-foreground/70">Step 1 of 2 · Upload photos</p>
+                    <div className="relative overflow-hidden rounded-xl border border-border bg-black/10 dark:bg-black/30">
+                      {previews.length > 0 ? (
+                        <div className="relative aspect-square w-full">
+                          <Carousel images={previews} />
+                          <label className="absolute bottom-3 right-3 z-10 flex cursor-pointer items-center gap-1 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-black/80">
+                            <ImagePlus className="size-3.5" /> Add more
+                            <input type="file" accept="image/*" multiple className="hidden" onChange={e => appendFiles(e.target.files)} />
+                          </label>
+                        </div>
+                      ) : (
+                        <label className="flex aspect-square w-full cursor-pointer flex-col items-center justify-center gap-3 transition hover:bg-accent/30">
+                          <ImagePlus className="size-16 text-muted-foreground/20" />
+                          <p className="text-sm text-muted-foreground">Upload bill photos</p>
+                          <p className="text-[11px] text-muted-foreground/40">Select multiple for a carousel</p>
+                          <input type="file" accept="image/*" multiple className="hidden" onChange={e => replaceFiles(e.target.files)} />
+                        </label>
+                      )}
+                    </div>
                   </div>
                 ) : (
-                  <label className="flex size-full cursor-pointer flex-col items-center justify-center gap-3 transition hover:bg-accent/30">
-                    <ImagePlus className="size-16 text-muted-foreground/20" />
-                    <p className="text-sm text-muted-foreground">Upload bill photos</p>
-                    <p className="text-[11px] text-muted-foreground/40">Select multiple for a carousel</p>
-                    <input type="file" accept="image/*" multiple className="hidden" onChange={e => { if (e.target.files?.length) setFiles(Array.from(e.target.files)) }} />
-                  </label>
-                )}
-              </div>
-              <div className="flex flex-col gap-3 p-4">
-                {myProfile && (
-                  <div className="flex items-center gap-2">
-                    <Avatar url={myProfile.avatar_url} name={myProfile.display_name} size={28} />
-                    <span className="text-sm font-semibold">{myProfile.handle}</span>
+                  <div className="flex h-full flex-col gap-3 p-4">
+                    <p className="text-xs text-muted-foreground/70">Step 2 of 2 · Add caption</p>
+                    {myProfile && (
+                      <div className="flex items-center gap-2">
+                        <Avatar url={myProfile.avatar_url} name={myProfile.display_name} size={28} />
+                        <span className="text-sm font-semibold">{myProfile.handle}</span>
+                      </div>
+                    )}
+                    {previews.length > 0 && (
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        {previews.map((src, i) => (
+                          <img key={src} src={src} alt="" className={`size-14 shrink-0 rounded-md object-cover ${i === 0 ? "ring-2 ring-amber-500/60" : ""}`} />
+                        ))}
+                        <button onClick={() => setComposerStep("media")} className="shrink-0 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition hover:text-foreground">
+                          Edit photos
+                        </button>
+                      </div>
+                    )}
+                    <textarea
+                      value={caption}
+                      onChange={e => setCaption(e.target.value)}
+                      rows={8}
+                      placeholder="Write a caption..."
+                      className="min-h-[180px] w-full flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/40"
+                    />
+                    <p className="text-[11px] text-muted-foreground/40"><Sparkles className="mr-1 inline size-3" />AI will auto-tag price, category &amp; location from your image</p>
                   </div>
                 )}
-                <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={6} placeholder="Write a caption..."
-                  className="flex-1 w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/40" />
-                <p className="text-[11px] text-muted-foreground/40"><Sparkles className="mr-1 inline size-3" />AI will auto-tag price, category &amp; location from your image</p>
+              </div>
+
+              <div className="hidden md:grid md:grid-cols-2">
+                <div className="relative flex aspect-square items-center justify-center border-b border-border bg-black/10 dark:bg-black/30 md:border-b-0 md:border-r">
+                  {previews.length > 0 ? (
+                    <div className="relative size-full">
+                      <Carousel images={previews} />
+                      <label className="absolute bottom-3 right-3 z-10 flex cursor-pointer items-center gap-1 rounded-full bg-black/60 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-black/80">
+                        <ImagePlus className="size-3.5" /> Add more
+                        <input type="file" accept="image/*" multiple className="hidden" onChange={e => appendFiles(e.target.files)} />
+                      </label>
+                    </div>
+                  ) : (
+                    <label className="flex size-full cursor-pointer flex-col items-center justify-center gap-3 transition hover:bg-accent/30">
+                      <ImagePlus className="size-16 text-muted-foreground/20" />
+                      <p className="text-sm text-muted-foreground">Upload bill photos</p>
+                      <p className="text-[11px] text-muted-foreground/40">Select multiple for a carousel</p>
+                      <input type="file" accept="image/*" multiple className="hidden" onChange={e => replaceFiles(e.target.files)} />
+                    </label>
+                  )}
+                </div>
+                <div className="flex flex-col gap-3 p-4">
+                  {myProfile && (
+                    <div className="flex items-center gap-2">
+                      <Avatar url={myProfile.avatar_url} name={myProfile.display_name} size={28} />
+                      <span className="text-sm font-semibold">{myProfile.handle}</span>
+                    </div>
+                  )}
+                  <textarea value={caption} onChange={e => setCaption(e.target.value)} rows={6} placeholder="Write a caption..."
+                    className="flex-1 w-full resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground/40" />
+                  <p className="text-[11px] text-muted-foreground/40"><Sparkles className="mr-1 inline size-3" />AI will auto-tag price, category &amp; location from your image</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="sticky bottom-0 border-t border-border bg-card/95 backdrop-blur md:hidden">
+              <div className="flex items-center gap-2 px-4 py-3">
+                {composerStep === "caption" && (
+                  <button
+                    onClick={() => setComposerStep("media")}
+                    className="rounded-lg border border-border px-3 py-2 text-sm font-medium text-muted-foreground transition hover:text-foreground"
+                  >
+                    Back
+                  </button>
+                )}
+                {composerStep === "media" ? (
+                  <button
+                    onClick={() => setComposerStep("caption")}
+                    disabled={!hasComposerFiles}
+                    className="ml-auto rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Next
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => handleSubmit()}
+                    disabled={!canShareComposer}
+                    className="ml-auto rounded-lg bg-amber-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-400 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Share
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -484,31 +595,70 @@ export default function FeedPage() {
 
 function Carousel({ images }: { images: string[] }) {
   const [idx, setIdx] = useState(0)
+  const touchStartX = useRef<number | null>(null)
+  const touchDeltaX = useRef(0)
   const count = images.length
+  const clampedIdx = Math.min(idx, Math.max(0, count - 1))
+  const SWIPE_THRESHOLD = 45
+
+  function goPrev() {
+    setIdx(prev => Math.max(0, Math.min(prev, count - 1) - 1))
+  }
+
+  function goNext() {
+    setIdx(prev => Math.min(count - 1, Math.min(prev, count - 1) + 1))
+  }
+
+  function handleTouchStart(e: TouchEvent<HTMLDivElement>) {
+    touchStartX.current = e.touches[0]?.clientX ?? null
+    touchDeltaX.current = 0
+  }
+
+  function handleTouchMove(e: TouchEvent<HTMLDivElement>) {
+    if (touchStartX.current == null) return
+    touchDeltaX.current = (e.touches[0]?.clientX ?? 0) - touchStartX.current
+  }
+
+  function handleTouchEnd() {
+    const delta = touchDeltaX.current
+    if (Math.abs(delta) >= SWIPE_THRESHOLD) {
+      if (delta < 0) goNext()
+      if (delta > 0) goPrev()
+    }
+    touchStartX.current = null
+    touchDeltaX.current = 0
+  }
+
   if (count === 0) return null
   if (count === 1) return <img src={images[0]} alt="" className="w-full rounded" />
 
   return (
-    <div className="group/car relative overflow-hidden rounded">
+    <div
+      className="group/car relative overflow-hidden rounded touch-pan-y"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+      onTouchCancel={handleTouchEnd}
+    >
       <div
         className="flex transition-transform duration-300 ease-out"
-        style={{ transform: `translateX(-${idx * 100}%)` }}
+        style={{ transform: `translateX(-${clampedIdx * 100}%)` }}
       >
         {images.map((src, i) => (
           <img key={i} src={src} alt="" className="w-full shrink-0 object-cover" />
         ))}
       </div>
-      {idx > 0 && (
+      {clampedIdx > 0 && (
         <button
-          onClick={() => setIdx(idx - 1)}
+          onClick={goPrev}
           className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/50 p-1 text-white opacity-0 transition group-hover/car:opacity-100"
         >
           <ChevronLeft className="size-4" />
         </button>
       )}
-      {idx < count - 1 && (
+      {clampedIdx < count - 1 && (
         <button
-          onClick={() => setIdx(idx + 1)}
+          onClick={goNext}
           className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full bg-black/50 p-1 text-white opacity-0 transition group-hover/car:opacity-100"
         >
           <ChevronRight className="size-4" />
@@ -519,12 +669,12 @@ function Carousel({ images }: { images: string[] }) {
           <button
             key={i}
             onClick={() => setIdx(i)}
-            className={`size-1.5 rounded-full transition ${i === idx ? "bg-white" : "bg-white/40"}`}
+            className={`size-1.5 rounded-full transition ${i === clampedIdx ? "bg-white" : "bg-white/40"}`}
           />
         ))}
       </div>
       <span className="absolute right-3 top-3 z-10 rounded-full bg-black/50 px-2 py-0.5 text-[11px] font-medium text-white">
-        {idx + 1}/{count}
+        {clampedIdx + 1}/{count}
       </span>
     </div>
   )

@@ -1,7 +1,9 @@
 import json
 import os
+import re
 import threading
 import uuid
+from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -117,6 +119,145 @@ def _resolve_image(img) -> str:
                 return img.image_url or ""
         return img.image_url or ""
     return str(img) if img else ""
+
+
+def _to_decimal(value):
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            return Decimal(str(value))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+    text = str(value).strip()
+    if not text:
+        return None
+    cleaned = (
+        text.replace(",", "")
+        .replace("₹", "")
+        .replace("$", "")
+        .replace("INR", "")
+        .replace("Rs.", "")
+        .replace("Rs", "")
+        .strip()
+    )
+    try:
+        return Decimal(cleaned)
+    except (InvalidOperation, ValueError, TypeError):
+        match = re.search(r"-?\d+(?:\.\d+)?", cleaned)
+        if not match:
+            return None
+        try:
+            return Decimal(match.group(0))
+        except (InvalidOperation, ValueError, TypeError):
+            return None
+
+
+def _amount_from_caption(text: str):
+    if not text:
+        return None
+    explicit = re.findall(r"(?:₹|Rs\.?|INR|\$)\s*([0-9][0-9,]*(?:\.\d+)?)", text, flags=re.IGNORECASE)
+    if explicit:
+        parsed = [_to_decimal(x) for x in explicit]
+        values = [x for x in parsed if x is not None and x > 0]
+        if values:
+            return max(values)
+    return None
+
+
+def _aggregate_analyses(analyses: list[dict], caption: str, image_count_submitted: int) -> dict:
+    valid = [a for a in analyses if isinstance(a, dict) and not a.get("error")]
+    if valid:
+        amount_total = Decimal("0")
+        original_total = Decimal("0")
+        has_original = False
+        tags = []
+        category_candidates = []
+        currency = "INR"
+        location = ""
+        confidence_vals = []
+        descriptions = []
+        is_bill = False
+        is_monetary = False
+
+        for a in valid:
+            if a.get("currency"):
+                currency = str(a["currency"])
+            if a.get("location") and not location:
+                location = str(a["location"])
+            if isinstance(a.get("category"), str) and a["category"]:
+                category_candidates.append(a["category"])
+            if isinstance(a.get("description"), str) and a["description"]:
+                descriptions.append(a["description"])
+            if isinstance(a.get("tags"), list):
+                tags.extend([str(t) for t in a["tags"] if t])
+            if a.get("is_bill"):
+                is_bill = True
+            if a.get("is_monetary"):
+                is_monetary = True
+
+            try:
+                c = float(a["confidence"]) if a.get("confidence") is not None else None
+                if c is not None:
+                    confidence_vals.append(c)
+            except (TypeError, ValueError):
+                pass
+
+            if a.get("amount") is not None:
+                parsed_amount = _to_decimal(a.get("amount"))
+                if parsed_amount is not None and parsed_amount > 0:
+                    amount_total += parsed_amount
+            if a.get("original_amount") is not None:
+                parsed_original = _to_decimal(a.get("original_amount"))
+                if parsed_original is not None and parsed_original > 0:
+                    original_total += parsed_original
+                    has_original = True
+
+        deduped_tags = list(dict.fromkeys(tags))
+        category = Counter(category_candidates).most_common(1)[0][0] if category_candidates else "other"
+        confidence = (sum(confidence_vals) / len(confidence_vals)) if confidence_vals else 0
+        if amount_total <= 0:
+            caption_amount = _amount_from_caption(caption)
+            if caption_amount is not None and caption_amount > 0:
+                amount_total = caption_amount
+        return {
+            "status": "done",
+            "amount": float(amount_total),
+            "original_amount": float(original_total) if has_original else None,
+            "currency": currency or "INR",
+            "category": category,
+            "location": location,
+            "tags": deduped_tags,
+            "is_bill": is_bill,
+            "is_monetary": is_monetary,
+            "description": descriptions[0] if descriptions else "Combined analysis from multiple images",
+            "confidence": confidence,
+            "image_count_analyzed": len(valid),
+            "image_count_submitted": image_count_submitted,
+        }
+
+    caption_amount = _amount_from_caption(caption)
+    if caption_amount is not None and caption_amount > 0:
+        return {
+            "status": "done",
+            "amount": float(caption_amount),
+            "original_amount": None,
+            "currency": "INR",
+            "category": "other",
+            "location": "",
+            "tags": [],
+            "is_bill": False,
+            "is_monetary": True,
+            "description": "Amount inferred from caption",
+            "confidence": 0,
+            "image_count_analyzed": 0,
+            "image_count_submitted": image_count_submitted,
+        }
+
+    # Keep the first error payload so frontend can surface a meaningful reason.
+    return analyses[0] if analyses else {"error": "analysis_failed", "amount": 0, "tags": [], "confidence": 0}
 
 
 def _serialize_post(post: Post, liked_ids: set | None = None) -> dict:
@@ -411,22 +552,28 @@ def presign_upload(request):
 
 # ── Post CRUD ────────────────────────────────────────────────────────────
 
-def _analyze_post_background(post_id: int, image_url: str, caption: str):
+def _analyze_post_background(post_id: int, image_url: str | list[str], caption: str):
     """Run GPT analysis in a background thread. Updates the post when done."""
     try:
-        analysis = _analyze_with_gpt(image_url, caption)
+        image_urls = [image_url] if isinstance(image_url, str) else [u for u in image_url if u]
+        if not image_urls:
+            return
+
+        analyses = []
+        for url in image_urls:
+            analyses.append(_analyze_with_gpt(url, caption))
+        analysis = _aggregate_analyses(analyses, caption, len(image_urls))
+
         post = Post.objects.get(id=post_id)
         post.ai_analysis = analysis
         if analysis.get("amount") and not analysis.get("error"):
-            try:
-                post.amount = Decimal(str(analysis["amount"]))
-            except (InvalidOperation, ValueError):
-                pass
+            parsed_amount = _to_decimal(analysis.get("amount"))
+            if parsed_amount is not None:
+                post.amount = parsed_amount
         if analysis.get("original_amount"):
-            try:
-                post.original_amount = Decimal(str(analysis["original_amount"]))
-            except (InvalidOperation, ValueError):
-                pass
+            parsed_original = _to_decimal(analysis.get("original_amount"))
+            if parsed_original is not None:
+                post.original_amount = parsed_original
         if analysis.get("category"):
             post.category = analysis["category"]
         if analysis.get("location"):
@@ -474,21 +621,22 @@ def create_post(request):
     for i, key in enumerate(s3_keys):
         PostImage.objects.create(post=post, s3_key=key, order=i)
 
-    image_url_for_analysis = ""
+    image_urls_for_analysis = []
     if s3_keys:
-        try:
-            image_url_for_analysis = _presigned_get(s3_keys[0], ttl=300)
-        except Exception:
-            pass
+        for key in s3_keys:
+            try:
+                image_urls_for_analysis.append(_presigned_get(key, ttl=300))
+            except Exception:
+                continue
     elif post.image_url:
-        image_url_for_analysis = post.image_url
+        image_urls_for_analysis = [post.image_url]
 
-    if image_url_for_analysis:
+    if image_urls_for_analysis:
         post.ai_analysis = {"status": "pending"}
         post.save(update_fields=["ai_analysis"])
         t = threading.Thread(
             target=_analyze_post_background,
-            args=(post.id, image_url_for_analysis, post.caption),
+            args=(post.id, image_urls_for_analysis, post.caption),
             daemon=True,
         )
         t.start()
